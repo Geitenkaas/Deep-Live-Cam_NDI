@@ -289,6 +289,14 @@ def run_flask(face_swapper, opts):
     return html_ui
 
 
+  @app.route("/stage")
+  @cross_origin(supports_credentials=True)
+  def stage():
+    with open("templates/index_stage.html", "r") as f:
+      html_ui = f.read()
+    return html_ui
+
+
   @app.route("/ui")
   @cross_origin(supports_credentials=True)
   def ui():

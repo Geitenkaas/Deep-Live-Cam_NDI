@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html class="js consumer build-stable chrome win64-incapable mac twisty-js" lang="en" id="mac">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta charset="utf-8">
+    <meta content="initial-scale=1, minimum-scale=1, width=device-width" name="viewport">
+    <title>
+      Remote deep fake server for Improbotics
+    </title>
+    <style>
+      /* Body of page */
+      body {
+        height: 100%;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: cover;
+        background-color: black;
+        overflow: hidden;
+      }
+      /* Command buttons */
+      .command {
+        background-color: #000;
+        color: #888888;
+        float: left;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 0px 0px;
+        font-size: 24px;
+        width: 256px;
+        height: 40px;
+        transition: all ease-in-out 0.2s;
+      }
+      .command:hover {
+        background-color: #222222;
+      }
+
+    </style>
+    <style>
+      a.c1 {font-weight: normal;}
+    </style>
+    <style type="text/css">
+      #::-webkit-scrollbar { display: none; }
+    </style>
+  </head>
+
+  <body class="" id="grid">
+
+    <div id="div_ui">
+      <button class="command" onclick="navigateTo('localhost:8765/ar')" align="center">A.L.Ex lines</button>
+      <button class="command" align="center">Deep Fake</button>
+      <button class="command" onclick="navigateTo('localhost:7770/monitor')" align="center">CYO Adventure</button>
+      <button class="command" onclick="navigateTo('localhost:7770/showplan')" align="center">Show Plan</button>
+    </div>
+
+    <div id="div_stream">
+      <img id="stream" width=100% src="/stream">
+    </div>
+
+  </body>
+
+<script src="./socket.io.js" crossorigin="anonymous"></script>
+<script>
+
+
+// Establish socket with server
+var url_server = window.location.origin;
+console.log("Attempting socket connection with:", url_server);
+var socket = io.connect(url_server);
+socket.on('connect', function() {
+  url_server = window.location.origin;
+  console.log("Connection has been succesfully established with socket.", url_server, socket.connected);
+  document.getElementById("stream").src = "/stream";
+});
+
+
+
+// Callback for navigating to a different page
+function navigateTo(url) {
+  var url_without_port = window.location.hostname;
+  url = "http://" + url.replace("localhost", url_without_port);
+  window.location.href = url;
+};
+
+
+</script>
+</html>

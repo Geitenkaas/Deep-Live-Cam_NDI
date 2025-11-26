@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Switch to venv
+source venv/bin/activate
+
 # Always replace last deep fake by Einstein
 cp templates/einstein.jpg images/temp.jpg
 
