@@ -121,11 +121,12 @@ class FaceSwapper(object):
 
 
   def _store_source_image(self, cv2_image):
-    log(f"Image of type {type(cv2_image)}, shape {cv2_image.shape}, max {cv2_image.max()}", "source")
-    self.source_image["image"] = cv2_image
-    self.source_image["annotated_image"] = get_one_face(cv2_image)
-    self.source_image["byte_string"] = self._write_numpy_to_byte_string(self.source_image["image"])
-    self.source_image["timestamp"] = time.time()
+    if cv2_image is not None:
+      log(f"Image of type {type(cv2_image)}, shape {cv2_image.shape}, max {cv2_image.max()}", "source")
+      self.source_image["image"] = cv2_image
+      self.source_image["annotated_image"] = get_one_face(cv2_image)
+      self.source_image["byte_string"] = self._write_numpy_to_byte_string(self.source_image["image"])
+      self.source_image["timestamp"] = time.time()
 
 
   def copy_from_alt_temp_file(self) -> None:
