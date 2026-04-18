@@ -7,10 +7,11 @@ from flask_socketio import SocketIO, emit
 import io
 import logging
 import socket
+import sys
 import time
 import threading
-
 import cv2
+from cv2_enumerate_cameras import enumerate_cameras
 import numpy as np
 from PIL import Image
 
@@ -22,12 +23,13 @@ from modules.processors.frame.core import get_frame_processors_modules
 
 
 parser = argparse.ArgumentParser(description='Deep Fake server')
-parser.add_argument('-s', '--source', help='select an source image', dest='source_path')
+parser.add_argument('-s', '--source', help='select an source image', dest='source_path',
+                    default="templates/einstein.jpg")
 parser.add_argument('--port', help='Port', dest='port', type=int, default=8001)
 parser.add_argument('--temporary_image', help='temporary camera image', dest='camera_image_path',
                     default='images/temp.jpg')
 parser.add_argument('--device', help='webcam device', dest='device',
-                    type=int, default=0)
+                    type=str, default="Integrated Webcam")
 parser.add_argument('--width', help='width in pixels', dest='width',
                     type=int, default=960)
 parser.add_argument('--height', help='height in pixels', dest='height',
@@ -43,13 +45,22 @@ def log(msg: str, msg_type: str) -> None:
   print(f"[{msg_type}] {msg}")
 
 
+def list_webcams() -> int:
+  ids = []
+  for camera_info in enumerate_cameras():
+    print(f"{camera_info.index}: {camera_info.name}")
+    if camera_info.name == opts.device:
+      ids.append(camera_info.index)
+  return min(ids) if ids else 0
+
+
 class FaceSwapper(object):
 
   def __init__(self, opts):
     # Initialise the parameters
     self._camera_image_path = opts.camera_image_path
     self._source_path = opts.source_path
-    self._device = opts.device
+    self._device = list_webcams()
     self._width = opts.width
     self._height = opts.height
     self._init(opts)
@@ -64,8 +75,6 @@ class FaceSwapper(object):
     self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)  # Set the width of the resolution
     self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)  # Set the height of the resolution
     self._cap.set(cv2.CAP_PROP_FPS, 60)  # Set the frame rate of the webcam
-    PREVIEW_MAX_WIDTH = self._width
-    PREVIEW_MAX_HEIGHT = self._height
 
     # Set up the frame processors
     self.setup()
@@ -132,7 +141,7 @@ class FaceSwapper(object):
   def copy_from_alt_temp_file(self) -> None:
     """Capture the source image from the camera."""
     log(f"Copying alt image, storing in {self._camera_image_path}...", "source")
-    cv2_image = cv2.imread("images/deep1.jpg")
+    cv2_image = cv2.imread("images/temp.jpg")
     self._store_source_image(cv2_image)
     cv2.imwrite(self._camera_image_path, cv2_image)
 
@@ -197,7 +206,7 @@ class FaceSwapper(object):
 
 
   def start(self):
-    self._thread = threading.Thread(target=self._run_deep_fake_loop, args=())
+    self._thread = threading.Thread(target=self._run_deep_fake_loop, args=(), daemon=True)
     self._thread.start()
 
 
@@ -384,4 +393,8 @@ def run_flask(face_swapper, opts):
 
 if __name__ == '__main__':
   face_swapper = FaceSwapper(opts)
-  run_flask(face_swapper, opts)
+  try:
+    run_flask(face_swapper, opts)
+  except KeyboardInterrupt:
+    log("Ctrl+C pressed. Exiting...", "info")
+    sys.exit(0)
