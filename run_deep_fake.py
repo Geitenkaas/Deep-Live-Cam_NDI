@@ -309,6 +309,14 @@ def run_flask(face_swapper, opts):
     return flask.send_file(filename, download_name=filename, mimetype='text/javascript')
 
 
+  @app.route('/<filename>.css')
+  @cross_origin(supports_credentials=True)
+  def return_css(filename):
+    """Function for returning CSS."""
+    filename = './templates/' + filename + '.css'
+    return flask.send_file(filename, download_name=filename, mimetype='text/css')
+
+
   @app.route('/images/<filename>')
   @cross_origin(supports_credentials=True)
   def return_image(filename):
