@@ -158,7 +158,7 @@
           </label>
         </td>
         <td style="padding-left: 20px;">
-          <button class="command" onclick="sendGetQuery('click')" align="center">Take picture</button>
+          <button class="command" onclick="takePicture()" align="center">Take picture</button>
         </td>
         <td style="padding-left: 20px;">
           <input type="text" id="search_query" placeholder="Enter image search query..."
@@ -172,7 +172,7 @@
       style="display: flex; flex-direction: row; height: calc(100vh - 160px); width: 100%; margin-top: 10px; clear: both;">
       <iframe style="visibility: visible; flex-grow: 1; height: 100%; border: none;" id="source" src="/source"></iframe>
       <div id="search_results"
-        style="display: flex; flex-direction: column; gap: 10px; margin-left: 10px; width: 120px; overflow-y: auto; align-items: center;">
+        style="display: flex; flex-direction: column; gap: 4px; margin-left: 4px; width: 160px; overflow-y: auto; align-items: center;">
         <!-- Images will appear here -->
       </div>
     </div>
@@ -276,43 +276,90 @@
 
 
   function performSearch() {
-    const query = document.getElementById('search_query').value;
+    const searchInput = document.getElementById('search_query');
+    const query = searchInput.value;
     if (!query) return;
-    const resultsDiv = document.getElementById('search_results');
-    resultsDiv.innerHTML = 'Searching...';
+
+    const originalPlaceholder = searchInput.placeholder;
+    searchInput.value = '';
+    searchInput.placeholder = 'Searching...';
+
     fetch('/search/' + encodeURIComponent(query))
       .then(response => response.json())
       .then(data => {
+        searchInput.placeholder = originalPlaceholder;
         if (data.status === 'success') {
           loadExistingImages();
         } else {
-          resultsDiv.innerHTML = 'Error: ' + data.message;
+          alert('Error: ' + data.message);
         }
       })
       .catch(error => {
-        resultsDiv.innerHTML = 'Error searching.';
+        searchInput.placeholder = originalPlaceholder;
+        alert('Error searching.');
         console.error(error);
       });
   }
 
+  function takePicture() {
+    var xmlHttp = new XMLHttpRequest();
+    xmlHttp.open("GET", url_server + "/click", true);
+    xmlHttp.onreadystatechange = function () {
+      if (xmlHttp.readyState == 4 && xmlHttp.status == 200) {
+        let camImg = document.getElementById('camera_img_thumbnail');
+        if (camImg) {
+          camImg.src = '/images/camera.jpg?t=' + new Date().getTime();
+          camImg.style.display = 'block';
+        }
+      }
+    }
+    xmlHttp.send(null);
+  }
+
   function loadExistingImages() {
     const resultsDiv = document.getElementById('search_results');
-    resultsDiv.innerHTML = '';
-    for (let i = 0; i < 5; i++) {
-      const img = document.createElement('img');
-      img.src = '/images/search_' + i + '.jpg?t=' + new Date().getTime();
-      img.style.width = '100%';
-      img.style.height = 'auto';
-      img.style.objectFit = 'cover';
-      img.style.borderRadius = '4px';
-      img.style.cursor = 'pointer';
-      img.onclick = function () {
-        sendGetQuery('use_image/' + i);
+
+    let camImg = document.getElementById('camera_img_thumbnail');
+    if (!camImg) {
+      camImg = document.createElement('img');
+      camImg.id = 'camera_img_thumbnail';
+      camImg.style.width = '100%';
+      camImg.style.height = 'auto';
+      camImg.style.objectFit = 'cover';
+      camImg.style.borderRadius = '4px';
+      camImg.style.cursor = 'pointer';
+      camImg.style.border = '2px solid #666';
+      camImg.onclick = function () {
+        sendGetQuery('use_image/camera');
       };
+      resultsDiv.appendChild(camImg);
+    }
+    camImg.onerror = function () {
+      this.style.display = 'none';
+    };
+    camImg.src = '/images/camera.jpg?t=' + new Date().getTime();
+    camImg.style.display = 'block';
+
+    for (let i = 0; i < 3; i++) {
+      let img = document.getElementById('search_img_' + i);
+      if (!img) {
+        img = document.createElement('img');
+        img.id = 'search_img_' + i;
+        img.style.width = '100%';
+        img.style.height = 'auto';
+        img.style.objectFit = 'cover';
+        img.style.borderRadius = '4px';
+        img.style.cursor = 'pointer';
+        img.onclick = function () {
+          sendGetQuery('use_image/' + i);
+        };
+        resultsDiv.appendChild(img);
+      }
       img.onerror = function () {
-        this.remove();
+        this.style.display = 'none';
       };
-      resultsDiv.appendChild(img);
+      img.src = '/images/search_' + i + '.jpg?t=' + new Date().getTime();
+      img.style.display = 'block';
     }
   }
 

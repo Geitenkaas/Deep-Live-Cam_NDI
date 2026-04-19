@@ -3,40 +3,39 @@
 import argparse
 import flask
 from flask_cors import CORS, cross_origin
-from flask_socketio import SocketIO, emit
-import io
+from flask_socketio import SocketIO
 import logging
 import os
 import requests
-import socket
 import sys
 import time
 from ddgs import ddgs
 import threading
 import cv2
-from cv2_enumerate_cameras import enumerate_cameras
-import numpy as np
-from PIL import Image
 
 from modules import core
 from modules.face_analyser import get_one_face
 import modules.globals
 from modules.processors.frame.core import get_frame_processors_modules
+import utils
 
+
+_TEMPORARY_IMAGE_PATH = "images/temp.jpg"
+_CAMERA_IMAGE_PATH = "images/camera.jpg"
 
 
 parser = argparse.ArgumentParser(description='Deep Fake server')
 parser.add_argument('-s', '--source', help='select an source image', dest='source_path',
                     default="templates/einstein.jpg")
 parser.add_argument('--port', help='Port', dest='port', type=int, default=8001)
-parser.add_argument('--temporary_image', help='temporary camera image', dest='camera_image_path',
-                    default='images/temp.jpg')
 parser.add_argument('--device', help='webcam device', dest='device',
                     type=str, default="Integrated Webcam")
 parser.add_argument('--width', help='width in pixels', dest='width',
                     type=int, default=960)
 parser.add_argument('--height', help='height in pixels', dest='height',
                     type=int, default=540)
+parser.add_argument('--num-search-images', help='number of images to search by ddgs', dest='num_search_images',
+                    type=int, default=3)
 parser.add_argument('--max-memory', help='maximum amount of RAM in GB', dest='max_memory',
                     type=int, default=core.suggest_max_memory())
 parser.add_argument('--execution-provider', help='execution provider', dest='execution_provider',
@@ -48,15 +47,6 @@ def log(msg: str, msg_type: str) -> None:
   print(f"[{msg_type}] {msg}")
 
 
-def list_webcams() -> int:
-  ids = []
-  for camera_info in enumerate_cameras():
-    print(f"{camera_info.index}: {camera_info.name}")
-    if camera_info.name == opts.device:
-      ids.append(camera_info.index)
-  return min(ids) if ids else 0
-
-
 class FaceSwapper(object):
 
   def __init__(self, opts):
@@ -65,9 +55,8 @@ class FaceSwapper(object):
       os.makedirs("images")
 
     # Initialise the parameters
-    self._camera_image_path = opts.camera_image_path
     self._source_path = opts.source_path
-    self._device = list_webcams()
+    self._device = utils.list_webcams(opts.device)
     self._width = opts.width
     self._height = opts.height
     self._init(opts)
@@ -141,45 +130,35 @@ class FaceSwapper(object):
       log(f"Image of type {type(cv2_image)}, shape {cv2_image.shape}, max {cv2_image.max()}", "source")
       self.source_image["image"] = cv2_image
       self.source_image["annotated_image"] = get_one_face(cv2_image)
-      self.source_image["byte_string"] = self._write_numpy_to_byte_string(self.source_image["image"])
+      self.source_image["byte_string"] = utils.write_numpy_to_byte_string(self.source_image["image"])
       self.source_image["timestamp"] = time.time()
 
 
-  def copy_from_alt_temp_file(self) -> None:
-    """Capture the source image from the camera."""
-    log(f"Copying alt image, storing in {self._camera_image_path}...", "source")
-    cv2_image = cv2.imread("images/temp.jpg")
+  def read_source_image_from_file(self) -> None:
+    """Read the source image from a file."""
+    log(f"Reading image from {_TEMPORARY_IMAGE_PATH}...", "source")
+    cv2_image = cv2.imread(_TEMPORARY_IMAGE_PATH)
     self._store_source_image(cv2_image)
-    cv2.imwrite(self._camera_image_path, cv2_image)
 
 
   def capture_source_image_from_camera(self) -> None:
     """Capture the source image from the camera."""
     if self.current_camera["image"] is not None:
-      log(f"Capturing camera image, storing in {self._camera_image_path}...", "source")
+      log(f"Capturing camera image, storing in {_CAMERA_IMAGE_PATH}...", "source")
       cv2_image = self.current_camera["image"].copy()
+      cv2.imwrite(_CAMERA_IMAGE_PATH, cv2_image)
+      cv2.imwrite(_TEMPORARY_IMAGE_PATH, cv2_image)
       self._store_source_image(cv2_image)
-      cv2.imwrite(self._camera_image_path, cv2_image)
 
 
   def _load_source_image_from_file(self) -> None:
     """Load the source image from a file."""
-    if modules.globals.source_path:
-      log(f"Loading image {modules.globals.source_path}...", "source")
-      cv2_image = cv2.imread(modules.globals.source_path)
+    if self._source_path:
+      log(f"Loading image {self._source_path}...", "source")
+      cv2_image = cv2.imread(self._source_path)
+      cv2.imwrite(_CAMERA_IMAGE_PATH, cv2_image)
+      cv2.imwrite(_TEMPORARY_IMAGE_PATH, cv2_image)
       self._store_source_image(cv2_image)
-
-
-  def _write_numpy_to_byte_string(self, image: np.ndarray):
-    """Write numpy array image onto a bytestream."""
-    if image is not None:
-      frame = io.BytesIO()
-      image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-      image = Image.fromarray(image)
-      image.save(frame, format='JPEG')
-      return frame.getvalue()
-    else:
-      return None
 
 
   def _run_deep_fake_loop(self) -> None:
@@ -195,7 +174,7 @@ class FaceSwapper(object):
       # Create a copy of the camera frame and store it.
       self.current_camera["image"] = camera_frame.copy()
       self.current_camera["timestamp"] = time.time()
-      self.current_camera["byte_string"] = self._write_numpy_to_byte_string(self.current_camera["image"])
+      self.current_camera["byte_string"] = utils.write_numpy_to_byte_string(self.current_camera["image"])
 
       # Process the camera frame to create the deep fake.
       fake_image = camera_frame.copy()
@@ -208,7 +187,7 @@ class FaceSwapper(object):
 
       # Convert the image to RGB format to display it with Tkinter and store it.
       self.current_deepfake["image"] = fake_image
-      self.current_deepfake["byte_string"] = self._write_numpy_to_byte_string(self.current_deepfake["image"])
+      self.current_deepfake["byte_string"] = utils.write_numpy_to_byte_string(self.current_deepfake["image"])
       self.current_deepfake["timestamp"] = time.time()
 
 
@@ -343,18 +322,21 @@ def run_flask(face_swapper, opts):
   @cross_origin(supports_credentials=True)
   def copy():
     nonlocal face_swapper
-    face_swapper.copy_from_alt_temp_file()
+    face_swapper.read_source_image_from_file()
     return str(source_image["timestamp"])
 
 
-  @app.route("/use_image/<int:index>")
+  @app.route("/use_image/<index>")
   @cross_origin(supports_credentials=True)
   def use_image(index):
     nonlocal face_swapper
     import shutil
     try:
-      shutil.copyfile(f"images/search_{index}.jpg", "images/temp.jpg")
-      face_swapper.copy_from_alt_temp_file()
+      if index == "camera":
+        shutil.copyfile(_CAMERA_IMAGE_PATH, _TEMPORARY_IMAGE_PATH)
+      else:
+        shutil.copyfile(f"images/search_{index}.jpg", _TEMPORARY_IMAGE_PATH)
+      face_swapper.read_source_image_from_file()
       return flask.jsonify({"status": "success"})
     except Exception as e:
       return flask.jsonify({"status": "error", "message": str(e)})
@@ -409,7 +391,7 @@ def run_flask(face_swapper, opts):
             query=query,
             region="wt-wt",
             safesearch="moderate",
-            max_results=5
+            max_results=opts.num_search_images
         )
 
       downloaded = []
@@ -418,24 +400,17 @@ def run_flask(face_swapper, opts):
         try:
           response = requests.get(image_url, timeout=10)
           response.raise_for_status()
-          img = Image.open(io.BytesIO(response.content))
-          if img.mode != 'RGB':
-            img = img.convert('RGB')
+          img = utils.get_image_from_bytes(response.content)
           
           if face_swapper.current_camera.get("image") is not None:
             cam_shape = face_swapper.current_camera["image"].shape
             cam_width, cam_height = cam_shape[1], cam_shape[0]
-            try:
-              resample = Image.Resampling.LANCZOS
-            except AttributeError:
-              resample = Image.LANCZOS
-            from PIL import ImageOps
-            img = ImageOps.pad(img, (cam_width, cam_height), method=resample, color=(0, 0, 0))
+            img = utils.resize_image(img, cam_width, cam_height)
 
           filename = f"images/search_{index}.jpg"
           img.save(filename, "JPEG")
           downloaded.append(filename)
-          if len(downloaded) == 5:
+          if len(downloaded) == opts.num_search_images:
             break
         except Exception as e:
           log(f"Could not download image {image_url}: {e}", "error")
