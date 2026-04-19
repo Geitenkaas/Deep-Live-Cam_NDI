@@ -3,6 +3,7 @@
 Flask
 Flask-CORS
 flask_socketio
+Werkzeug
 numpy>=1.23.5,<2
 typing-extensions>=4.8.0
 opencv-python==4.10.0.84
@@ -20,3 +21,4 @@ onnxruntime-gpu==1.17
 tensorflow
 opennsfw2==0.10.2
 protobuf==4.23.2
+ddgs
