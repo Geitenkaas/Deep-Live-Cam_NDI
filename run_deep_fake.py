@@ -6,9 +6,12 @@ from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO, emit
 import io
 import logging
+import os
+import requests
 import socket
 import sys
 import time
+from ddgs import ddgs
 import threading
 import cv2
 from cv2_enumerate_cameras import enumerate_cameras
@@ -57,6 +60,10 @@ def list_webcams() -> int:
 class FaceSwapper(object):
 
   def __init__(self, opts):
+    # Make sure the images directory exists
+    if not os.path.exists("images"):
+      os.makedirs("images")
+
     # Initialise the parameters
     self._camera_image_path = opts.camera_image_path
     self._source_path = opts.source_path
@@ -323,12 +330,34 @@ def run_flask(face_swapper, opts):
     return flask.send_file(filename, download_name=filename, mimetype='text/javascript')
 
 
+  @app.route('/images/<filename>')
+  @cross_origin(supports_credentials=True)
+  def return_image(filename):
+    """Function for returning images."""
+    import os
+    filepath = os.path.abspath(os.path.join('images', filename))
+    return flask.send_file(filepath, mimetype='image/jpeg')
+
+
   @app.route("/copy")
   @cross_origin(supports_credentials=True)
   def copy():
     nonlocal face_swapper
     face_swapper.copy_from_alt_temp_file()
     return str(source_image["timestamp"])
+
+
+  @app.route("/use_image/<int:index>")
+  @cross_origin(supports_credentials=True)
+  def use_image(index):
+    nonlocal face_swapper
+    import shutil
+    try:
+      shutil.copyfile(f"images/search_{index}.jpg", "images/temp.jpg")
+      face_swapper.copy_from_alt_temp_file()
+      return flask.jsonify({"status": "success"})
+    except Exception as e:
+      return flask.jsonify({"status": "error", "message": str(e)})
 
 
   @app.route("/click")
@@ -369,6 +398,50 @@ def run_flask(face_swapper, opts):
     nonlocal face_swapper
     face_swapper.many_faces(False)
     return str("single_face")
+
+
+  @app.route("/search/<query>", methods=['GET'])
+  @cross_origin(supports_credentials=True)
+  def search(query):
+    try:
+      with ddgs.DDGS() as ddgs_search:
+        results = ddgs_search.images(
+            query=query,
+            region="wt-wt",
+            safesearch="moderate",
+            max_results=5
+        )
+
+      downloaded = []
+      for index, result in enumerate(results):
+        image_url = result.get('image')
+        try:
+          response = requests.get(image_url, timeout=10)
+          response.raise_for_status()
+          img = Image.open(io.BytesIO(response.content))
+          if img.mode != 'RGB':
+            img = img.convert('RGB')
+          
+          if face_swapper.current_camera.get("image") is not None:
+            cam_shape = face_swapper.current_camera["image"].shape
+            cam_width, cam_height = cam_shape[1], cam_shape[0]
+            try:
+              resample = Image.Resampling.LANCZOS
+            except AttributeError:
+              resample = Image.LANCZOS
+            from PIL import ImageOps
+            img = ImageOps.pad(img, (cam_width, cam_height), method=resample, color=(0, 0, 0))
+
+          filename = f"images/search_{index}.jpg"
+          img.save(filename, "JPEG")
+          downloaded.append(filename)
+          if len(downloaded) == 5:
+            break
+        except Exception as e:
+          log(f"Could not download image {image_url}: {e}", "error")
+      return flask.jsonify({"status": "success", "images": downloaded})
+    except Exception as e:
+      return flask.jsonify({"status": "error", "message": str(e)}), 500
 
 
   @app.route("/source")
