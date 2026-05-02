@@ -13,6 +13,7 @@ from ddgs import ddgs
 import threading
 import cv2
 import numpy as np
+import rembg
 
 from modules import core
 from modules.face_analyser import get_one_face, get_many_faces
@@ -84,6 +85,10 @@ class FaceSwapper(object):
     # Use the tempoerary face image saved by default.
     self._load_source_image_from_file()
 
+    # Initialize the rembg session
+    self.rembg_session = rembg.new_session()
+    self.background_removal = False
+
     # Start the deep fake processing
     self._thread = None
     self.start()
@@ -112,6 +117,10 @@ class FaceSwapper(object):
     self.target_embedding = None
 
 
+  def background_removal(self, value: bool):
+    self.background_removal = value
+
+
   def many_faces(self, value: bool):
     prev_value = modules.globals.many_faces
     modules.globals.many_faces = value
@@ -133,7 +142,8 @@ class FaceSwapper(object):
   def status(self):
     return {"many_faces": modules.globals.many_faces,
             "faces": self.current_faces,
-            "active": self.current_deepfake["active"]}
+            "active": self.current_deepfake["active"],
+            "background_removal": self.background_removal}
 
 
   def _store_source_image(self, cv2_image):
@@ -249,6 +259,8 @@ class FaceSwapper(object):
 
       # Process the camera frame to create the deep fake.
       fake_image = camera_frame.copy()
+      if self.background_removal:
+        fake_image = rembg.remove(fake_image, session=self.rembg_session)[:][:, :, :3]
       if self.current_deepfake["active"] is True:
         source_face = self.source_image["annotated_image"]
         fake_image = self._process_frame(source_face, fake_image)
@@ -469,6 +481,22 @@ def run_flask(face_swapper, opts):
     nonlocal face_swapper
     face_swapper.reset_target_embedding()
     return str("reset_target")
+
+
+  @app.route("/background_removal_on")
+  @cross_origin(supports_credentials=True)
+  def background_removal_on():
+    nonlocal face_swapper
+    face_swapper.background_removal = True
+    return str("background_removal_on")
+
+
+  @app.route("/background_removal_off")
+  @cross_origin(supports_credentials=True)
+  def background_removal_off():
+    nonlocal face_swapper
+    face_swapper.background_removal = False
+    return str("background_removal_off")
 
 
   @app.route("/search/<query>", methods=['GET'])

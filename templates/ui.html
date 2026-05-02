@@ -38,6 +38,17 @@
             Single face
           </label>
         </td>
+        <td>
+          <label class="switch">
+            <input type="checkbox" id="bg_remove_button" width=96px onclick="toggleBgRemove()">
+            <span class="slider round"></span>
+          </label>
+        </td>
+        <td align="left" width=96px>
+          <label class="caption" id="bg_remove_button_state" align="left">
+            Bg kept
+          </label>
+        </td>
         <td class="padded-cell">
           <button class="command" onclick="takePicture()" align="center">Take picture</button>
         </td>
@@ -143,6 +154,46 @@
       switchManyFaces(true);
     } else {
       switchSingleFace(true);
+    }
+  };
+
+
+  // Toggle for background removal
+  function switchBgRemove(force = false) {
+    if ((force == true) || (bg_remove_button.checked == false)) {
+      sendGetQuery("background_removal_on");
+      showBgRemove();
+    }
+  };
+  function switchBgKept(force = false) {
+    if ((force == true) || (bg_remove_button.checked == true)) {
+      sendGetQuery("background_removal_off");
+      showBgKept();
+    }
+  };
+  function showBgKept() {
+    if (bg_remove_button.checked == true) {
+      bg_remove_button.checked = false;
+    }
+    const caption = document.getElementById('bg_remove_button_state');
+    if (caption.innerText != "Bg kept") {
+      caption.innerText = "Bg kept";
+    }
+  };
+  function showBgRemove() {
+    if (bg_remove_button.checked == false) {
+      bg_remove_button.checked = true;
+    }
+    const caption = document.getElementById('bg_remove_button_state');
+    if (caption.innerText != "Bg removed") {
+      caption.innerText = "Bg removed";
+    }
+  };
+  function toggleBgRemove() {
+    if (bg_remove_button.checked == true) {
+      switchBgRemove(true);
+    } else {
+      switchBgKept(true);
     }
   };
 
@@ -273,6 +324,13 @@
         showManyFaces();
       } else {
         showSingleFace();
+      }
+    }
+    if ("background_removal" in status) {
+      if (status["background_removal"] == true) {
+        showBgRemove();
+      } else {
+        showBgKept();
       }
     }
   });
