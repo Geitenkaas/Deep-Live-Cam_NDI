@@ -14,14 +14,17 @@ import threading
 import cv2
 
 from modules import core
-from modules.face_analyser import get_one_face
+from modules.face_analyser import get_one_face, get_many_faces
 import modules.globals
 from modules.processors.frame.core import get_frame_processors_modules
+from modules.processors.frame.face_swapper import swap_face
+from modules.typing import Face, Frame
 import utils
 
 
 _TEMPORARY_IMAGE_PATH = "images/temp.jpg"
 _CAMERA_IMAGE_PATH = "images/camera.jpg"
+_KEYS = ['bbox', 'kps', 'gender', 'age']
 
 
 parser = argparse.ArgumentParser(description='Deep Fake server')
@@ -65,6 +68,7 @@ class FaceSwapper(object):
     self.source_image = {"image": None, "annotated_image": None, "timestamp": 0}
     self.current_camera = {"image": None, "byte_string": None, "timestamp": 0}
     self.current_deepfake = {"image": None, "byte_string":None, "timestamp": 0, "active": False}
+    self.current_faces = {}
 
     # Start the camera.
     self._cap = cv2.VideoCapture(self._device)  # Use index for the webcam (adjust the index accordingly if necessary)    
@@ -122,6 +126,7 @@ class FaceSwapper(object):
 
   def status(self):
     return {"many_faces": modules.globals.many_faces,
+            "faces": self.current_faces,
             "active": self.current_deepfake["active"]}
 
 
@@ -161,6 +166,49 @@ class FaceSwapper(object):
       self._store_source_image(cv2_image)
 
 
+  def _process_frame(self, source_face: Face, temp_frame: Frame) -> Frame:
+    """Reimplementation of process_frame from modules/processors/frame/face_swapper.py
+    but with possibility to track one specific face in the output frame."""
+    if modules.globals.color_correction:
+      temp_frame = cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB)
+
+    # Early exit if no source face is given.
+    if not source_face:
+      log("No source face found.", "error")
+      return temp_frame
+
+    # Get all the faces in the temp frame.
+    many_faces = get_many_faces(temp_frame)
+
+    # Store the face stats.
+    new_face_stats = []
+    if many_faces:
+      for face in many_faces:
+        face_stats = {}
+        for key in _KEYS:
+          val = face[key]
+          if hasattr(val, 'tolist'):
+            val = val.tolist()
+          elif hasattr(val, 'item'):
+            val = val.item()
+          face_stats[key] = val
+        new_face_stats.append(face_stats)
+    self.current_faces = new_face_stats
+
+    # Early exit if no target face is found.
+    if not many_faces:
+      log("No target faces found.", "error")
+      return temp_frame
+
+    if modules.globals.many_faces:
+      for target_face in many_faces:
+        temp_frame = swap_face(source_face, target_face, temp_frame)
+    else:
+      target_face = many_faces[0]
+      temp_frame = swap_face(source_face, target_face, temp_frame)
+    return temp_frame
+
+
   def _run_deep_fake_loop(self) -> None:
     """Run the deep fake loop."""
     while True:
@@ -179,11 +227,8 @@ class FaceSwapper(object):
       # Process the camera frame to create the deep fake.
       fake_image = camera_frame.copy()
       if self.current_deepfake["active"] is True:
-        # try:
-          for frame_processor in self._frame_processors:
-            fake_image = frame_processor.process_frame(self.source_image["annotated_image"], fake_image)
-        # except:
-        #   log("NEED TO TAKE NEW PICTURE", "error")
+        source_face = self.source_image["annotated_image"]
+        fake_image = self._process_frame(source_face, fake_image)
 
       # Convert the image to RGB format to display it with Tkinter and store it.
       self.current_deepfake["image"] = fake_image
