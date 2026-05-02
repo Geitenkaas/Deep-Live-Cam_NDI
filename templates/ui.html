@@ -42,6 +42,9 @@
           <button class="command" onclick="takePicture()" align="center">Take picture</button>
         </td>
         <td class="padded-cell">
+          <button class="command" onclick="resetTarget()" align="center">Reset target</button>
+        </td>
+        <td class="padded-cell">
           <input type="text" id="search_query" placeholder="Enter image search query..."
             onkeydown="if(event.key === 'Enter') performSearch()" />
         </td>
@@ -152,6 +155,10 @@
     xmlHttp.send(null);
   };
 
+  function resetTarget() {
+    sendGetQuery("reset_target");
+  };
+
 
   function performSearch() {
     const searchInput = document.getElementById('search_query');
@@ -249,23 +256,23 @@
   // Regularly query the socket
   setInterval(() => {
     socket.emit('status', {});
-  }, 100);
+  }, 50);
 
 
   // Callback for the status update
   socket.on('status-update', function (status) {
     if ("active" in status) {
       if (status["active"] == true) {
-        switchRunning(false);
+        showRunning();
       } else {
-        switchPaused(false);
+        showPaused();
       }
     }
     if ("many_faces" in status) {
       if (status["many_faces"] == true) {
-        switchManyFaces(false);
+        showManyFaces();
       } else {
-        switchSingleFace(false);
+        showSingleFace();
       }
     }
   });

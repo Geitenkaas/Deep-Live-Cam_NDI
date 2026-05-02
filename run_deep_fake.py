@@ -12,6 +12,7 @@ import time
 from ddgs import ddgs
 import threading
 import cv2
+import numpy as np
 
 from modules import core
 from modules.face_analyser import get_one_face, get_many_faces
@@ -68,7 +69,8 @@ class FaceSwapper(object):
     self.source_image = {"image": None, "annotated_image": None, "timestamp": 0}
     self.current_camera = {"image": None, "byte_string": None, "timestamp": 0}
     self.current_deepfake = {"image": None, "byte_string":None, "timestamp": 0, "active": False}
-    self.current_faces = {}
+    self.current_faces = []
+    self.target_embedding = None
 
     # Start the camera.
     self._cap = cv2.VideoCapture(self._device)  # Use index for the webcam (adjust the index accordingly if necessary)    
@@ -104,6 +106,10 @@ class FaceSwapper(object):
     modules.globals.execution_threads = 8
     modules.globals.fp_ui['face_enhancer'] = False
     modules.globals.nsfw = False
+
+
+  def reset_target_embedding(self):
+    self.target_embedding = None
 
 
   def many_faces(self, value: bool):
@@ -166,6 +172,23 @@ class FaceSwapper(object):
       self._store_source_image(cv2_image)
 
 
+  def _store_face_stats(self, faces):
+    """Store the face stats."""
+    new_face_stats = []
+    if faces:
+      for face in faces:
+        face_stats = {}
+        for key in _KEYS:
+          val = face[key]
+          if hasattr(val, 'tolist'):
+            val = val.tolist()
+          elif hasattr(val, 'item'):
+            val = val.item()
+          face_stats[key] = val
+        new_face_stats.append(face_stats)
+    self.current_faces = new_face_stats
+
+
   def _process_frame(self, source_face: Face, temp_frame: Frame) -> Frame:
     """Reimplementation of process_frame from modules/processors/frame/face_swapper.py
     but with possibility to track one specific face in the output frame."""
@@ -179,21 +202,8 @@ class FaceSwapper(object):
 
     # Get all the faces in the temp frame.
     many_faces = get_many_faces(temp_frame)
+    self._store_face_stats(many_faces)
 
-    # Store the face stats.
-    new_face_stats = []
-    if many_faces:
-      for face in many_faces:
-        face_stats = {}
-        for key in _KEYS:
-          val = face[key]
-          if hasattr(val, 'tolist'):
-            val = val.tolist()
-          elif hasattr(val, 'item'):
-            val = val.item()
-          face_stats[key] = val
-        new_face_stats.append(face_stats)
-    self.current_faces = new_face_stats
 
     # Early exit if no target face is found.
     if not many_faces:
@@ -204,7 +214,20 @@ class FaceSwapper(object):
       for target_face in many_faces:
         temp_frame = swap_face(source_face, target_face, temp_frame)
     else:
-      target_face = many_faces[0]
+      if self.target_embedding is None:
+        self.target_embedding = many_faces[0].normed_embedding
+        target_face = many_faces[0]
+      else:
+        best_face = many_faces[0]
+        best_sim = -1
+        for face in many_faces:
+          emb1 = self.target_embedding
+          emb2 = face.normed_embedding
+          similarity = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+          if similarity > best_sim:
+            best_sim = similarity
+            best_face = face
+        target_face = best_face
       temp_frame = swap_face(source_face, target_face, temp_frame)
     return temp_frame
 
@@ -229,6 +252,10 @@ class FaceSwapper(object):
       if self.current_deepfake["active"] is True:
         source_face = self.source_image["annotated_image"]
         fake_image = self._process_frame(source_face, fake_image)
+      else:
+        self.target_embedding = None
+        many_faces = get_many_faces(fake_image)
+        self._store_face_stats(many_faces)
 
       # Convert the image to RGB format to display it with Tkinter and store it.
       self.current_deepfake["image"] = fake_image
@@ -432,7 +459,16 @@ def run_flask(face_swapper, opts):
   def single_face():
     nonlocal face_swapper
     face_swapper.many_faces(False)
+    face_swapper.reset_target_embedding()
     return str("single_face")
+
+
+  @app.route("/reset_target")
+  @cross_origin(supports_credentials=True)
+  def reset_target():
+    nonlocal face_swapper
+    face_swapper.reset_target_embedding()
+    return str("reset_target")
 
 
   @app.route("/search/<query>", methods=['GET'])

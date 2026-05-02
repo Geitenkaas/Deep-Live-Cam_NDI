@@ -138,7 +138,7 @@
     canvas.height = rect.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!faces || faces.length === 0) return;
+    if (!faces || !Array.isArray(faces) || faces.length === 0) return;
 
     var scaleX = canvas.width / NATIVE_W;
     var scaleY = canvas.height / NATIVE_H;
@@ -221,7 +221,7 @@
     if (statusInterval) return;
     statusInterval = setInterval(function () {
       socket.emit('status', {});
-    }, 250);
+    }, 50);
   }
 
   socket.on('status-update', function (data) {
