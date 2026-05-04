@@ -1,87 +1,239 @@
 <!DOCTYPE html>
 <html class="js consumer build-stable chrome win64-incapable mac twisty-js" lang="en" id="mac">
-  <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    <meta charset="utf-8">
-    <meta content="initial-scale=1, minimum-scale=1, width=device-width" name="viewport">
-    <title>
-      Remote deep fake server for Improbotics
-    </title>
-    <style>
-      /* Body of page */
-      body {
-        height: 100%;
-        background-position: center;
-        background-repeat: no-repeat;
-        background-size: cover;
-        background-color: black;
-        overflow: hidden;
-      }
-      /* Command buttons */
-      .command {
-        background-color: #000;
-        color: #888888;
-        float: left;
-        border: none;
-        outline: none;
-        cursor: pointer;
-        padding: 0px 0px;
-        font-size: 24px;
-        width: 256px;
-        height: 40px;
-        transition: all ease-in-out 0.2s;
-      }
-      .command:hover {
-        background-color: #222222;
-      }
 
-    </style>
-    <style>
-      a.c1 {font-weight: normal;}
-    </style>
-    <style type="text/css">
-      #::-webkit-scrollbar { display: none; }
-    </style>
-  </head>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <meta content="initial-scale=1, minimum-scale=1, width=device-width" name="viewport">
+  <title>Remote deep fake server for Improbotics</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background-color: black;
+      overflow: hidden;
+    }
 
-  <body class="" id="grid">
+    /* Command buttons */
+    #div_ui {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 10;
+    }
 
-    <div id="div_ui">
-      <button class="command" onclick="navigateTo('localhost:8765/ar')" align="center">A.L.Ex lines</button>
-      <button class="command" align="center">Deep Fake</button>
-      <button class="command" onclick="navigateTo('localhost:7770/monitor')" align="center">CYO Adventure</button>
-      <button class="command" onclick="navigateTo('localhost:7770/showplan')" align="center">Show Plan</button>
+    .command {
+      background-color: #000;
+      color: #888888;
+      float: left;
+      border: none;
+      outline: none;
+      cursor: pointer;
+      padding: 0;
+      font-size: 24px;
+      width: 256px;
+      height: 40px;
+      transition: all ease-in-out 0.2s;
+    }
+
+    .command:hover {
+      background-color: #222222;
+    }
+
+    /* Stream + overlay wrapper */
+    #stream-wrapper {
+      position: relative;
+      display: block;
+      width: 100%;
+      line-height: 0;
+    }
+
+    #stream {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    /* Canvas sits exactly on top of the img; pointer-events:none lets clicks fall through */
+    #face-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body id="grid">
+
+  <div id="div_stream">
+    <div id="stream-wrapper">
+      <img id="stream" src="/stream" alt="deep fake stream">
+      <canvas id="face-overlay"></canvas>
     </div>
+  </div>
 
-    <div id="div_stream">
-      <img id="stream" width=100% src="/stream">
-    </div>
-
-  </body>
+</body>
 
 <script src="./socket.io.js" crossorigin="anonymous"></script>
 <script>
 
+  // ── DOM refs ─────────────────────────────────────────────────────────────────
+  var streamImg = document.getElementById('stream');
+  var canvas = document.getElementById('face-overlay');
+  var ctx = canvas.getContext('2d');
 
-// Establish socket with server
-var url_server = window.location.origin;
-console.log("Attempting socket connection with:", url_server);
-var socket = io.connect(url_server);
-socket.on('connect', function() {
-  url_server = window.location.origin;
-  console.log("Connection has been succesfully established with socket.", url_server, socket.connected);
-  document.getElementById("stream").src = "/stream";
-});
+  // Native stream resolution (set once the img loads its first frame).
+  // Default matches the server defaults (960 × 540).
+  var NATIVE_W = 960;
+  var NATIVE_H = 540;
+
+  streamImg.addEventListener('load', function () {
+    if (streamImg.naturalWidth > 0) NATIVE_W = streamImg.naturalWidth;
+    if (streamImg.naturalHeight > 0) NATIVE_H = streamImg.naturalHeight;
+  });
 
 
+  // ── Socket setup ─────────────────────────────────────────────────────────────
+  var url_server = window.location.origin;
+  console.log('Attempting socket connection with:', url_server);
+  var socket = io.connect(url_server);
 
-// Callback for navigating to a different page
-function navigateTo(url) {
-  var url_without_port = window.location.hostname;
-  url = "http://" + url.replace("localhost", url_without_port);
-  window.location.href = url;
-};
+  socket.on('connect', function () {
+    url_server = window.location.origin;
+    console.log('Socket connected:', url_server, socket.connected);
+    streamImg.src = '/stream';
+    startStatusPolling();
+  });
 
+
+  // ── Face bounding-box overlay ─────────────────────────────────────────────────
+
+  /**
+   * Draw a single L-shaped corner accent.
+   * (cx, cy) is the corner point; dx/dy control the arm lengths and directions.
+   */
+  function drawCorner(cx, cy, dx, dy) {
+    ctx.beginPath();
+    ctx.moveTo(cx + dx, cy);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx, cy + dy);
+    ctx.stroke();
+  }
+
+  /**
+   * Resize the canvas to match the img's current rendered size, then draw
+   * bounding-boxes and labels for every detected face.
+   *
+   * Each face object has:
+   *   bbox   : [x_min, y_min, x_max, y_max]  – native stream pixel coords
+   *   gender : 0 (female) | 1 (male)
+   *   age    : number
+   */
+  function drawFaces(faces) {
+    // Sync canvas size to the rendered img rectangle
+    var rect = streamImg.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!faces || !Array.isArray(faces) || faces.length === 0) return;
+
+    var scaleX = canvas.width / NATIVE_W;
+    var scaleY = canvas.height / NATIVE_H;
+
+    for (var idx = 0; idx < faces.length; idx++) {
+      var face = faces[idx];
+      var bbox = face.bbox;
+      if (!bbox || bbox.length < 4) continue;
+
+      var x0 = bbox[0] * scaleX;
+      var y0 = bbox[1] * scaleY;
+      var x1 = bbox[2] * scaleX;
+      var y1 = bbox[3] * scaleY;
+      var w = x1 - x0;
+      var h = y1 - y0;
+
+      var genderStr = (face.gender === 1) ? 'M' : 'F';
+      var ageStr = (face.age !== undefined && face.age !== null)
+        ? Math.round(face.age) + ' yrs'
+        : '? yrs';
+      var label = genderStr + '  ' + ageStr;
+
+      // Each face gets a distinct hue (golden-angle spacing keeps colours apart)
+      var hue = (idx * 137) % 360;
+      var boxColor = 'hsl(' + hue + ',100%,55%)';
+      var fillColor = 'hsla(' + hue + ',100%,55%,0.12)';
+      var labelBg = 'hsla(' + hue + ',100%,15%,0.80)';
+
+      // ── Tinted fill ───────────────────────────────────────────────────────────
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(x0, y0, w, h);
+
+      // ── Thin border ───────────────────────────────────────────────────────────
+      ctx.strokeStyle = boxColor;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x0, y0, w, h);
+
+      // ── Corner accents (HUD style) ────────────────────────────────────────────
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = boxColor;
+      var arm = Math.min(w, h) * 0.18;
+      drawCorner(x0, y0, arm, arm);   // top-left
+      drawCorner(x1, y0, -arm, arm);   // top-right
+      drawCorner(x0, y1, arm, -arm);   // bottom-left
+      drawCorner(x1, y1, -arm, -arm);   // bottom-right
+
+      // ── Label ─────────────────────────────────────────────────────────────────
+      var fontSize = Math.max(13, Math.min(22, h * 0.12));
+      ctx.font = 'bold ' + fontSize + 'px "Segoe UI", Arial, sans-serif';
+      ctx.textBaseline = 'bottom';
+
+      var padX = 6;
+      var padY = 4;
+      var textW = ctx.measureText(label).width;
+      var boxH = fontSize + padY * 2;
+      var labelY = y0;   // top edge of the face bbox
+
+      // Background pill – place above the box; fall back below if too close to top
+      var pillY = (labelY - boxH >= 0) ? labelY - boxH : labelY;
+      ctx.fillStyle = labelBg;
+      // roundRect may not exist in older browsers; guard it
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(x0, pillY, textW + padX * 2, boxH, 4);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x0, pillY, textW + padX * 2, boxH);
+      }
+
+      ctx.fillStyle = boxColor;
+      ctx.fillText(label, x0 + padX, pillY + boxH - padY);
+    }
+  }
+
+
+  // ── Status polling (every 250 ms) ─────────────────────────────────────────────
+  var statusInterval = null;
+
+  function startStatusPolling() {
+    if (statusInterval) return;
+    statusInterval = setInterval(function () {
+      socket.emit('status', {});
+    }, 50);
+  }
+
+  socket.on('status-update', function (data) {
+    drawFaces(data.faces || []);
+  });
+
+
+  // ── Redraw on window resize ───────────────────────────────────────────────────
+  window.addEventListener('resize', function () {
+    socket.emit('status', {});
+  });
 
 </script>
+
 </html>
