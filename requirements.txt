@@ -22,4 +22,4 @@ tensorflow
 opennsfw2==0.10.2
 protobuf==4.23.2
 ddgs
-
+rembg
