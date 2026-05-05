@@ -1,3 +1,14 @@
+From Piotr:
+
+I manage to make this work on my PC laptop with the lib versions in requirements.txt, Python 3.13.13, and nvidia-smi 596.36 (CUDA version 13.2)
+
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+start_deep_fake_laptop.bat
+```
+
 <h1 align="center">Deep-Live-Cam</h1>
 
 <p align="center">
