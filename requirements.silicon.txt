@@ -19,3 +19,5 @@ torchvision==0.20.1
 onnxruntime-silicon==1.16.3
 opennsfw2==0.10.2
 protobuf==4.23.2
+ddgs
+rembg
