@@ -14,6 +14,8 @@ import threading
 import cv2
 import numpy as np
 import rembg
+import pyvirtualcam
+import colorsys
 
 from modules import core
 from modules.face_analyser import get_one_face, get_many_faces
@@ -239,6 +241,7 @@ class FaceSwapper(object):
             best_face = face
         target_face = best_face
       temp_frame = swap_face(source_face, target_face, temp_frame)
+
     return temp_frame
 
 
@@ -273,6 +276,10 @@ class FaceSwapper(object):
       self.current_deepfake["image"] = fake_image
       self.current_deepfake["byte_string"] = utils.write_numpy_to_byte_string(self.current_deepfake["image"])
       self.current_deepfake["timestamp"] = time.time()
+
+      with pyvirtualcam.Camera(width=640, height=480, fps=20) as cam:
+      # with pyvirtualcam.Camera(width=1280, height=720, fps=20) as cam:
+        cam.send(cv2.cvtColor(fake_image, cv2.COLOR_BGR2RGB))
 
 
   def start(self):
