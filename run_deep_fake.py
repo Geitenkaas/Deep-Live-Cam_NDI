@@ -47,6 +47,14 @@ parser.add_argument('--max-memory', help='maximum amount of RAM in GB', dest='ma
                     type=int, default=core.suggest_max_memory())
 parser.add_argument('--execution-provider', help='execution provider', dest='execution_provider',
                     default=['coreml'], choices=core.suggest_execution_providers(), nargs='+')
+parser.add_argument('--frame-processor', help='pipeline of frame processors', dest='frame_processor',
+                    default=['face_swapper'], choices=['face_swapper', 'face_enhancer'], nargs='+')
+parser.add_argument('--ndi', help='broadcast output as NDI source', dest='ndi',
+                    action='store_true', default=False)
+parser.add_argument('--no-ndi-hx', help='send raw BGRA instead of NDI HX H.264', dest='no_ndi_hx',
+                    action='store_true', default=False)
+parser.add_argument('--ndi-name', help='NDI source name', dest='ndi_name',
+                    type=str, default='DeepLiveCam')
 opts = parser.parse_args()
 
 
@@ -91,6 +99,18 @@ class FaceSwapper(object):
     self.rembg_session = rembg.new_session()
     self.background_removal = False
 
+    # Optional NDI output
+    self._ndi = None
+    if opts.ndi:
+      from modules.ndi_output import NDISender
+      self._ndi = NDISender(
+          name=opts.ndi_name,
+          width=self._width,
+          height=self._height,
+          fps=20,
+          use_hx=not opts.no_ndi_hx,
+      )
+
     # Start the deep fake processing
     self._thread = None
     self.start()
@@ -100,7 +120,7 @@ class FaceSwapper(object):
     modules.globals.source_path = self._source_path
     modules.globals.target_path = None
     modules.globals.output_path = None
-    modules.globals.frame_processors = ["face_swapper"]
+    modules.globals.frame_processors = opts.frame_processor
     modules.globals.headless = None
     modules.globals.keep_fps = False
     modules.globals.keep_audio = False
@@ -111,7 +131,7 @@ class FaceSwapper(object):
     modules.globals.max_memory = opts.max_memory
     modules.globals.execution_providers = core.decode_execution_providers(opts.execution_provider)
     modules.globals.execution_threads = 8
-    modules.globals.fp_ui['face_enhancer'] = False
+    modules.globals.fp_ui['face_enhancer'] = 'face_enhancer' in opts.frame_processor
     modules.globals.nsfw = False
 
 
@@ -242,44 +262,52 @@ class FaceSwapper(object):
         target_face = best_face
       temp_frame = swap_face(source_face, target_face, temp_frame)
 
+    if 'face_enhancer' in modules.globals.frame_processors:
+      from modules.processors.frame.face_enhancer import enhance_face
+      temp_frame = enhance_face(temp_frame)
+
     return temp_frame
 
 
   def _run_deep_fake_loop(self) -> None:
     """Run the deep fake loop."""
-    while True:
+    with pyvirtualcam.Camera(width=self._width, height=self._height, fps=20) as cam:
+      log(f"Virtual camera started: {self._width}x{self._height}", "virtualcam")
+      while True:
 
-      # Read the camera and crash if no image.
-      camera_return, camera_frame = self._cap.read()
-      if not camera_return:
-        log("Cannot get camera input.", "error")
-        exit(0)
+        # Read the camera and crash if no image.
+        camera_return, camera_frame = self._cap.read()
+        if not camera_return:
+          log("Cannot get camera input.", "error")
+          exit(0)
 
-      # Create a copy of the camera frame and store it.
-      self.current_camera["image"] = camera_frame.copy()
-      self.current_camera["timestamp"] = time.time()
-      self.current_camera["byte_string"] = utils.write_numpy_to_byte_string(self.current_camera["image"])
+        # Store camera frame (skip JPEG encode — no /camera stream endpoint consumes it).
+        self.current_camera["image"] = camera_frame.copy()
+        self.current_camera["timestamp"] = time.time()
 
-      # Process the camera frame to create the deep fake.
-      fake_image = camera_frame.copy()
-      if self.background_removal:
-        fake_image = rembg.remove(fake_image, session=self.rembg_session)[:][:, :, :3]
-      if self.current_deepfake["active"] is True:
-        source_face = self.source_image["annotated_image"]
-        fake_image = self._process_frame(source_face, fake_image)
-      else:
-        self.target_embedding = None
-        many_faces = get_many_faces(fake_image)
-        self._store_face_stats(many_faces)
+        # Process the camera frame to create the deep fake.
+        fake_image = camera_frame.copy()
+        if self.background_removal:
+          fake_image = rembg.remove(fake_image, session=self.rembg_session)[:][:, :, :3]
+        if self.current_deepfake["active"] is True:
+          source_face = self.source_image["annotated_image"]
+          fake_image = self._process_frame(source_face, fake_image)
+        else:
+          self.target_embedding = None
+          # Only run face detection every 10 frames when inactive — just for status tracking.
+          if int(self.current_deepfake["timestamp"] * 10) % 10 == 0:
+            many_faces = get_many_faces(fake_image)
+            self._store_face_stats(many_faces)
 
-      # Convert the image to RGB format to display it with Tkinter and store it.
-      self.current_deepfake["image"] = fake_image
-      self.current_deepfake["byte_string"] = utils.write_numpy_to_byte_string(self.current_deepfake["image"])
-      self.current_deepfake["timestamp"] = time.time()
+        self.current_deepfake["image"] = fake_image
+        self.current_deepfake["byte_string"] = utils.write_numpy_to_byte_string(self.current_deepfake["image"])
+        self.current_deepfake["timestamp"] = time.time()
 
-      with pyvirtualcam.Camera(width=640, height=480, fps=20) as cam:
-      # with pyvirtualcam.Camera(width=1280, height=720, fps=20) as cam:
-        cam.send(cv2.cvtColor(fake_image, cv2.COLOR_BGR2RGB))
+        output_frame = cv2.resize(fake_image, (self._width, self._height))
+        cam.send(cv2.cvtColor(output_frame, cv2.COLOR_BGR2RGB))
+
+        if self._ndi:
+          self._ndi.send(output_frame)
 
 
   def start(self):
@@ -569,4 +597,7 @@ if __name__ == '__main__':
     run_flask(face_swapper, opts)
   except KeyboardInterrupt:
     log("Ctrl+C pressed. Exiting...", "info")
+  finally:
+    if face_swapper._ndi:
+      face_swapper._ndi.close()
     sys.exit(0)

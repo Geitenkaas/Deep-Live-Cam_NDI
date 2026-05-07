@@ -55,15 +55,13 @@ def get_face_enhancer() -> Any:
         if FACE_ENHANCER is None:
             model_path = os.path.join(models_dir, "GFPGANv1.4.pth")
             
-            match platform.system():
-                case "Darwin":  # Mac OS
-                    if torch.backends.mps.is_available():
-                        mps_device = torch.device("mps")
-                        FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1, device=mps_device)  # type: ignore[attr-defined]
-                    else:
-                        FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1)  # type: ignore[attr-defined]
-                case _:  # Other OS
-                    FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1)  # type: ignore[attr-defined]
+            if platform.system() == "Darwin" and torch.backends.mps.is_available():
+                device = torch.device("mps")
+            elif torch.cuda.is_available():
+                device = torch.device("cuda")
+            else:
+                device = torch.device("cpu")
+            FACE_ENHANCER = gfpgan.GFPGANer(model_path=model_path, upscale=1, device=device)  # type: ignore[attr-defined]
 
     return FACE_ENHANCER
 

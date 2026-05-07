@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/progra~ /d/progra~ -name \"Processing.NDI*.dll\")",
+      "Bash(ls \"C:/Program Files/NDI/\")",
+      "Bash(venv/Scripts/python.exe -c \"import av; print\\(av.__version__\\)\")",
+      "Bash(venv/Scripts/pip install *)",
+      "Bash(venv/Scripts/python.exe -c ' *)"
+    ]
+  }
+}
