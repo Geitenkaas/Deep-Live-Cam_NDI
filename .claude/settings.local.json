@@ -5,7 +5,10 @@
       "Bash(ls \"C:/Program Files/NDI/\")",
       "Bash(venv/Scripts/python.exe -c \"import av; print\\(av.__version__\\)\")",
       "Bash(venv/Scripts/pip install *)",
-      "Bash(venv/Scripts/python.exe -c ' *)"
+      "Bash(venv/Scripts/python.exe -c ' *)",
+      "PowerShell(winget install *)",
+      "PowerShell(& \"C:\\\\Program Files \\(x86\\)\\\\Microsoft Visual Studio\\\\Installer\\\\vswhere.exe\" -all -format json | ConvertFrom-Json | Select-Object installationPath, installationVersion, displayName)",
+      "PowerShell(Invoke-WebRequest \"https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx?download=true\" -OutFile \"D:\\\\github\\\\Deep-Live-Cam_NDI\\\\models\\\\inswapper_128_fp16.onnx\")"
     ]
   }
 }

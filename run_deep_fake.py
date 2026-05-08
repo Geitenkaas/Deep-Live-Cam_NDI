@@ -271,8 +271,15 @@ class FaceSwapper(object):
 
   def _run_deep_fake_loop(self) -> None:
     """Run the deep fake loop."""
-    with pyvirtualcam.Camera(width=self._width, height=self._height, fps=20) as cam:
+    try:
+      vcam: pyvirtualcam.Camera | None = pyvirtualcam.Camera(width=self._width, height=self._height, fps=20)
+      vcam.__enter__()
       log(f"Virtual camera started: {self._width}x{self._height}", "virtualcam")
+    except RuntimeError as e:
+      log(f"Virtual camera unavailable (install OBS to enable): {e}", "warning")
+      vcam = None
+
+    try:
       while True:
 
         # Read the camera and crash if no image.
@@ -304,10 +311,14 @@ class FaceSwapper(object):
         self.current_deepfake["timestamp"] = time.time()
 
         output_frame = cv2.resize(fake_image, (self._width, self._height))
-        cam.send(cv2.cvtColor(output_frame, cv2.COLOR_BGR2RGB))
+        if vcam is not None:
+          vcam.send(cv2.cvtColor(output_frame, cv2.COLOR_BGR2RGB))
 
         if self._ndi:
           self._ndi.send(output_frame)
+    finally:
+      if vcam is not None:
+        vcam.__exit__(None, None, None)
 
 
   def start(self):

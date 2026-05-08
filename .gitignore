@@ -29,3 +29,5 @@ switch_states.json
 ffmpeg
 images/
 CLAUDE.md
+.claude/
+fixbasicsr.py
